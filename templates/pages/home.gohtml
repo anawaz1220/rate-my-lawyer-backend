@@ -1,0 +1,35 @@
+{{define "content"}}
+    {{- if not (eq .HTMX.Request.Target "posts")}}
+        {{template "top-content" .}}
+    {{- end}}
+
+    {{template "posts" .}}
+
+    {{- if not (eq .HTMX.Request.Target "posts")}}
+        {{template "file-msg" .}}
+    {{- end}}
+{{end}}
+
+{{define "top-content"}}
+    <section class="hero is-info welcome is-small">
+        <div class="hero-body">
+            <div class="container">
+                <h1 class="title">
+                    Hello{{if .IsAuth}}, {{.AuthUser.Name}}{{end}}
+                </h1>
+                <h2 class="subtitle">{{if .IsAuth}}Welcome back!{{else}}Please login in to your account.{{end}}</h2>
+            </div>
+        </div>
+    </section>
+
+{{end}}
+
+{{define "posts"}}
+  
+{{end}}
+
+{{define "file-msg"}}
+    <div class="block"></div>
+    <article class="message is-small is-warning" x-data="{show: true}" x-show="show">
+   
+{{end}}

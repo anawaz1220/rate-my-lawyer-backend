@@ -1,0 +1,321 @@
+{{define "content"}}
+<div class="container mt-5">
+    <div id="calendar"></div>
+</div>
+
+<div id="routeDialog" class="modal" style="display: none;">
+    <div class="modal-background"></div>
+    <div class="modal-card">
+        <header class="modal-card-head">
+            <p class="modal-card-title">Routes for <span id="dialogDate"></span></p>
+            <button class="delete" aria-label="close" onclick="closeDialog()"></button>
+        </header>
+        <section class="modal-card-body">
+            <div id="routeChips" class="columns is-multiline">
+                <!-- Route chips will be dynamically added here -->
+            </div>
+        </section>
+    </div>
+</div>
+
+<div id="formDialog" class="modal" style="display: none;">
+    <div class="modal-background"></div>
+    <div class="modal-card">
+        <header class="modal-card-head">
+            <p class="modal-card-title">Plan Route: <span id="formDialogRouteName"></span></p>
+            <button class="delete" aria-label="close" onclick="closeFormDialog()"></button>
+        </header>
+        <section class="modal-card-body">
+            <form id="routeForm">
+                <div class="field">
+                    <label class="label">Select Truck(s)</label>
+                    <div class="control">
+                        <div class="select is-multiple is-fullwidth">
+                            <select id="truckSelect" multiple size="3"></select>
+                        </div>
+                    </div>
+                </div>
+                <div class="field">
+                    <label class="label">Select Driver</label>
+                    <div class="control">
+                        <div class="select is-fullwidth">
+                            <select id="driverSelect"></select>
+                        </div>
+                    </div>
+                </div>
+                <div class="field">
+                    <label class="label">Select Loader(s)</label>
+                    <div class="control">
+                        <div class="select is-multiple is-fullwidth">
+                            <select id="loaderSelect" multiple size="3"></select>
+                        </div>
+                    </div>
+                </div>
+                <div class="field">
+                    <label class="label">Select Material(s)</label>
+                    <div class="control">
+                        <div class="select is-multiple is-fullwidth">
+                            <select id="materialSelect" multiple size="3"></select>
+                        </div>
+                    </div>
+                </div>
+                <div class="field">
+                    <div class="control">
+                        <button type="submit" class="button is-primary">Submit</button>
+                    </div>
+                </div>
+            </form>
+        </section>
+    </div>
+</div>
+{{end}}
+
+{{define "scripts"}}
+<link href='https://cdn.jsdelivr.net/npm/fullcalendar@5.10.2/main.min.css' rel='stylesheet' />
+<script src='https://cdn.jsdelivr.net/npm/fullcalendar@5.10.2/main.min.js'></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    var calendarEl = document.getElementById('calendar');
+    var calendar = new FullCalendar.Calendar(calendarEl, {
+        initialView: 'dayGridMonth',
+        headerToolbar: {
+            left: 'prev,next today',
+            center: 'title',
+            right: 'dayGridMonth,timeGridWeek,timeGridDay'
+        },
+        firstDay: 1,
+        weekNumbers: true,
+        weekText: 'Week',
+        dayHeaderContent: function(arg) {
+            return arg.date.toLocaleDateString('en-US', { weekday: 'short' });
+        },
+        eventContent: function(arg) {
+            return { html: '' };
+        },
+        events: function(fetchInfo, successCallback, failureCallback) {
+            fetch('/api/calendar/current-month')
+                .then(response => response.json())
+                .then(data => {
+                    if (data && Array.isArray(data.days)) {
+                        var events = data.days.map(day => ({
+                            start: day.date,
+                            display: 'background',
+                            backgroundColor: getColorForStatus(day.status),
+                            classNames: ['status-' + day.status]
+                        }));
+                        successCallback(events);
+                    } else {
+                        console.error('Invalid API response format:', data);
+                        failureCallback('Invalid API response format');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching calendar data:', error);
+                    failureCallback(error);
+                });
+        },
+        dateClick: function(info) {
+            showRoutesDialog(info.date);
+        }
+    });
+    calendar.render();
+});
+
+function getColorForStatus(status) {
+    switch(status) {
+        case 'fully_planned':
+            return 'rgba(40, 167, 69, 0.3)';
+        case 'partially_planned':
+            return 'rgba(255, 193, 7, 0.3)';
+        case 'unplanned':
+            return 'rgba(220, 53, 69, 0.3)';
+        default:
+            return 'rgba(108, 117, 125, 0.3)';
+    }
+}
+
+function showRoutesDialog(date) {
+    const dayOfWeek = date.toLocaleDateString('en-US', { weekday: 'long' });
+    const formattedDate = date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    
+    document.getElementById('dialogDate').textContent = formattedDate;
+    
+    fetch(`/api/routes-by-day?day=${dayOfWeek}`)
+        .then(response => response.json())
+        .then(routes => {
+            const routeChips = document.getElementById('routeChips');
+            routeChips.innerHTML = '';
+            
+            routes.forEach(route => {
+                const chip = document.createElement('div');
+                chip.className = 'column is-one-third';
+                chip.innerHTML = `
+                    <div class="chip ${getChipColorClass(route.status)}" onclick="handleChipClick('${route.name}', '${route.status}', '${formattedDate}')">
+                        ${route.name}
+                    </div>
+                `;
+                routeChips.appendChild(chip);
+            });
+            
+            document.getElementById('routeDialog').style.display = 'block';
+        })
+        .catch(error => console.error('Error fetching routes:', error));
+}
+
+function getChipColorClass(status) {
+    switch(status) {
+        case 'planned':
+            return 'is-success';
+        case 'unplanned':
+            return 'is-danger';
+        case 'edited':
+            return 'is-info';
+        default:
+            return 'is-light';
+    }
+}
+
+function handleChipClick(routeName, status, date) {
+    if (status === 'unplanned') {
+        showFormDialog(routeName, date);
+    } else {
+        alert(`You clicked on route: ${routeName}`);
+    }
+}
+
+function showFormDialog(routeName, date) {
+    document.getElementById('formDialogRouteName').textContent = routeName;
+    document.getElementById('routeForm').reset();
+
+    // Fetch data for dropdowns
+    fetchDropdownData('trucks', 'truckSelect');
+    fetchDropdownData('drivers', 'driverSelect');
+    fetchDropdownData('loaders', 'loaderSelect');
+    fetchDropdownData('materials', 'materialSelect');
+
+    document.getElementById('formDialog').style.display = 'block';
+}
+
+function fetchDropdownData(type, selectId) {
+    fetch(`/api/available/${type}?date=${date}`)
+        .then(response => response.json())
+        .then(data => {
+            const select = document.getElementById(selectId);
+            select.innerHTML = '';
+            data.forEach(item => {
+                const option = document.createElement('option');
+                option.value = item.id;
+                option.textContent = item.name;
+                select.appendChild(option);
+            });
+        })
+        .catch(error => console.error(`Error fetching ${type}:`, error));
+}
+
+document.getElementById('routeForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const formData = {
+        routeName: document.getElementById('formDialogRouteName').textContent,
+        trucks: Array.from(document.getElementById('truckSelect').selectedOptions).map(option => option.value),
+        driver: document.getElementById('driverSelect').value,
+        loaders: Array.from(document.getElementById('loaderSelect').selectedOptions).map(option => option.value),
+        materials: Array.from(document.getElementById('materialSelect').selectedOptions).map(option => option.value)
+    };
+
+    // Here you would typically send this data to your backend
+    console.log('Form submitted with data:', formData);
+
+    // Update the chip color (this should ideally be done after a successful API response)
+    updateChipStatus(formData.routeName, 'planned');
+
+    closeFormDialog();
+});
+
+function updateChipStatus(routeName, newStatus) {
+    const chips = document.querySelectorAll('.chip');
+    chips.forEach(chip => {
+        if (chip.textContent.trim() === routeName) {
+            chip.className = `chip ${getChipColorClass(newStatus)}`;
+        }
+    });
+}
+
+function closeDialog() {
+    document.getElementById('routeDialog').style.display = 'none';
+}
+
+function closeFormDialog() {
+    document.getElementById('formDialog').style.display = 'none';
+}
+</script>
+<style>
+.fc-day-today {
+    background-color: rgba(255, 165, 0, 0.2) !important;
+}
+.future-date {
+    cursor: pointer;
+    transition: all 0.3s;
+}
+.future-date:hover {
+    transform: scale(1.05);
+    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+}
+.status-fully_planned { background-color: rgba(40, 167, 69, 0.3) !important; }
+.status-partially_planned { background-color: rgba(255, 193, 7, 0.3) !important; }
+.status-unplanned { background-color: rgba(220, 53, 69, 0.3) !important; }
+.fc-day:hover .fc-daygrid-day-number {
+    font-weight: bold;
+}
+.fc-week-number {
+    background-color: #007bff;
+    color: white;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+}
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0,0,0,0.4);
+}
+.modal-card {
+    background-color: #fefefe;
+    margin: 15% auto;
+    padding: 20px;
+    border: 1px solid #888;
+    width: 80%;
+    max-width: 600px;
+}
+.chip {
+    padding: 10px;
+    border-radius: 5px;
+    border: 2px solid orange;    
+    margin: 5px;
+    display: inline-block;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+.chip:hover {
+    transform: scale(1.05);
+    box-shadow: 0 0 10px rgba(0,0,0,0.4);
+}
+.is-success { background-color: #28a745; color: white; }
+.is-danger { background-color: #dc3545; color: white; }
+.is-info { background-color: #17a2b8; color: white; }
+.is-light { background-color: #f8f9fa; color: #343a40; }
+select[multiple] {
+    height: auto;
+    overflow-y: auto;
+}
+</style>
+{{end}}
